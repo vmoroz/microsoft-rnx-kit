@@ -277,6 +277,12 @@ interface SyncConfigFile {
   // repo-relative path under localPath). Materialized via sparse-checkout.
   // Mutually exclusive with subDir. Empty/absent = not used.
   sparsePaths?: string[];
+  // Partial-clone filter for the upstream clone (git --filter=<value>).
+  // Defaults to "blob:none". For very large repos vendored as a small subset,
+  // "tree:0" defers trees too (fetched on demand at the sparse checkout), which
+  // dramatically shrinks the initial clone — at the cost of on-demand fetches
+  // during later history-walking operations (merge re-syncs, PR-note logs).
+  cloneFilter?: string;
   tag: string; // Tag name if synced to a tag (empty string otherwise)
   lastSync: string; // ISO timestamp of last sync (empty string if never synced)
 }
@@ -303,6 +309,7 @@ interface SyncConfig {
   lastSync: string;
   subDir: string; // Normalized subfolder path, empty string = whole repo
   sparsePaths: string[]; // Normalized sparse-checkout paths, [] = not used
+  cloneFilter: string; // git partial-clone filter, defaults to "blob:none"
 }
 
 /**
@@ -1047,10 +1054,17 @@ ${style.line()}
         : `${this.config.repo}.git`;
 
       await ensureDir(path.dirname(this.syncPath));
-      // Clone without blobs to reduce initial download. Show progress via interactive mode.
+      // Partial clone to reduce initial download (default blob:none; "tree:0"
+      // for huge repos vendored as a small subset). When sparse paths are
+      // configured, skip the initial checkout so the whole default branch isn't
+      // materialized before sparse-checkout narrows it — the hydration then
+      // happens once, at the later sparse target checkout. Show progress via
+      // interactive mode.
+      const useSparse = this.syncPathspecs.length > 0;
       const cloneStep = job.step("Cloning repository...");
       for await (const chunk of clone(cloneUrl, this.syncPath, {
-        filter: "blob:none",
+        filter: this.config.cloneFilter,
+        noCheckout: useSparse,
         cwd: this.repoRoot,
       })) {
         cloneStep.update(chunk.text.trim());
@@ -1469,6 +1483,9 @@ ${style.line()}
       ...(this.config.subDir ? { subDir: this.config.subDir } : {}),
       ...(this.config.sparsePaths.length
         ? { sparsePaths: this.config.sparsePaths }
+        : {}),
+      ...(this.config.cloneFilter !== "blob:none"
+        ? { cloneFilter: this.config.cloneFilter }
         : {}),
       tag: newTag,
       lastSync: new Date().toISOString(),
@@ -2085,6 +2102,7 @@ async function loadSyncConfig(
       ? normalizePath(configFile.subDir).replace(/\/+$/, "")
       : "",
     sparsePaths,
+    cloneFilter: configFile.cloneFilter?.trim() || "blob:none",
   };
 }
 

@@ -129,6 +129,7 @@ after each successful sync.
 | `commit`      | Last synced upstream commit hash (empty/absent for the first sync)                 |
 | `subDir`      | Single subfolder within the upstream repo to sync, prefix-stripped (optional)      |
 | `sparsePaths` | Multiple upstream directories to vendor, identity-mapped (optional; see below)     |
+| `cloneFilter` | Partial-clone filter, `git --filter=<value>` (optional; default `blob:none`)       |
 | `tag`         | Tag name if synced to a tag (empty string otherwise)                              |
 | `lastSync`    | ISO timestamp of last sync (empty string if never synced)                         |
 
@@ -199,6 +200,25 @@ When `sparsePaths` is set:
 - **`.syncignore` still applies** for fine-grained trimming _within_ the selected
   directories (e.g. drop `base/test/`).
 - It is **mutually exclusive** with `subDir`.
+- The clone uses **`--no-checkout`** so the entire default branch is never
+  materialized before sparse-checkout narrows it; hydration happens once, at the
+  sparse target checkout.
+
+#### Treeless clones for very large repos (`cloneFilter`)
+
+By default fork-sync clones with `--filter=blob:none` (file contents fetched on
+demand). For a **huge** upstream where you only vendor a small subset, the trees
+themselves dominate the download. Set `cloneFilter` to `tree:0` to defer trees as
+well — combined with `sparsePaths`, only the trees/blobs along the selected paths
+are ever fetched, shrinking the initial clone by orders of magnitude:
+
+```json
+{ "cloneFilter": "tree:0", "sparsePaths": ["base", "sandbox"] }
+```
+
+Trade-off: `tree:0` makes later **history-walking** operations (the 3-way-merge
+re-sync, PR-note `git log`) fetch trees on demand, so they are slower. A **first
+sync** runs no merge, so `tree:0` is essentially free for the initial import.
 
 ### .syncignore
 

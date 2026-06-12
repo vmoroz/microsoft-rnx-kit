@@ -448,10 +448,14 @@ export async function discoverRepoRoot(cwd?: string): Promise<string | null> {
 export function clone(
   url: string,
   targetDir: string,
-  opts?: { filter?: string; cwd?: string }
+  opts?: { filter?: string; cwd?: string; noCheckout?: boolean }
 ): AsyncIterable<OutputChunk> {
   const args = ["clone"];
   if (opts?.filter) args.push(`--filter=${opts.filter}`);
+  // Skip the initial working-tree checkout. Used with sparse-checkout so the
+  // expensive hydration happens once, at the later sparse target checkout,
+  // instead of materializing the whole default branch first.
+  if (opts?.noCheckout) args.push("--no-checkout");
   args.push(url, targetDir);
   return spawn("git", args, {
     cwd: opts?.cwd ?? process.cwd(),
